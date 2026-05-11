@@ -14,10 +14,10 @@ CORS(app)
 def scrape_fragrantica():
     target_url = request.args.get('url')
     if not target_url or 'fragrantica.com/perfume/' not in target_url:
-        return jsonify({"error": "URL invalid"}), 400
+        return jsonify({"error": "رابط غير صحيح"}), 400
 
     try:
-        # استخدام جسر AllOrigins لتجاوز حظر Cloudflare نهائياً
+        # استخدام جسر AllOrigins لتجاوز الحماية (هذا هو الحل الوحيد لـ Render)
         bridge_url = "https://api.allorigins.win/get?url=" + urllib.parse.quote(target_url)
         
         req = urllib.request.Request(bridge_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -26,17 +26,14 @@ def scrape_fragrantica():
             html = data.get('contents', '')
 
         if not html:
-            return jsonify({"error": "No content found"}), 502
+            return jsonify({"error": "فشل جلب البيانات من الجسر"}), 502
             
         soup = BeautifulSoup(html, 'html.parser')
-
-        # استخراج الوصف
-        desc = "لا يوجد وصف متاح"
+        desc = "لا يوجد وصف"
         desc_div = soup.find('div', id='perfume-description-content')
         if desc_div and desc_div.find('p'):
             desc = desc_div.find('p').get_text(strip=True)
 
-        # استخراج النوتات
         def get_notes(html_text, level_name):
             notes = []
             parts = html_text.split(level_name)
