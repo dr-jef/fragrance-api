@@ -15,55 +15,65 @@ def scrape_fragrantica():
         return jsonify({"error": "Missing URL"}), 400
 
     try:
-        # 1. التظاهر بأننا "بوت أرشقة" (مثل GoogleBot) لتجاوز الحماية
+        # 1. التظاهر بهوية متصفح حقيقي + Googlebot لتجاوز الحماية
         proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(target_url)}"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9'
         }
         
         response = requests.get(proxy_url, headers=headers, timeout=30)
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
 
-        # 2. استخراج الوصف من وسوم Meta (الطريقة المضمونة 100%)
-        # Fragrantica يضع الوصف كاملاً في meta property="og:description"
+        # 2. استخراج الوصف من Meta Tags (الذي نجحنا فيه)
         desc = "الوصف غير متاح."
         meta_desc = soup.find("meta", property="og:description") or soup.find("meta", name="description")
         if meta_desc:
             desc = meta_desc["content"]
 
-        # 3. استخراج النوتات (من الكود البرمجي المخفي JSON-LD)
-        # الموقع يضع البيانات بصيغة JSON داخل الكود لكي يفهمها جوجل
-        all_notes = []
-        try:
-            # البحث عن جميع الصور التي تحتوي كلمة nnotes
-            images = re.findall(r'src="([^"]+nnotes[^"]+)"', html)
-            # البحث عن الأسماء في pyramid-note-label
-            names = re.findall(r'pyramid-note-label[^>]*>\s*([^<]+)\s*</span>', html)
-            
-            for i in range(min(len(images), len(names))):
-                all_notes.append({
-                    "name": names[i].strip(),
-                    "image": images[i].strip()
-                })
-        except:
-            pass
+        # 3. دالة استخراج النوتات (المسح الذكي)
+        def get_notes_from_pyramid(section_name):
+            notes_list = []
+            # البحث عن العنوان النصي في الصفحة
+            label = soup.find(string=re.compile(section_name, re.I))
+            if label:
+                # العثور على الحاوية الأقرب التي تضم الصور والأسماء
+                parent_container = label.find_parent(['div', 'b']).find_next_sibling()
+                if parent_container:
+                    # استخراج كل النوتات داخل هذا القسم
+                    items = parent_container.find_all('div', recursive=True)
+                    for item in items:
+                        img_tag = item.find('img')
+                        label_tag = item.find(class_=re.compile("pyramid-note-label|note-label", re.I))
+                        
+                        if img_tag and label_tag:
+                            img_url = img_tag.get('src')
+                            if "nnotes" in img_url or "ingredients" in img_url:
+                                notes_list.append({
+                                    "name": label_tag.get_text(strip=True),
+                                    "image": img_url
+                                })
+            return notes_list
 
-        # إذا فشل استخراج الأسماء، نحاول سحب أي نص بجانب الصور
-        if not all_notes:
-            note_matches = re.findall(r'src="([^"]+nnotes[^"]+)".*?>\s*([^<]+)\s*<', html, re.DOTALL)
-            for img, name in note_matches:
-                all_notes.append({"name": name.strip(), "image": img.strip()})
+        # تنفيذ المسح للأقسام الثلاثة
+        final_notes = {
+            "top": get_notes_from_pyramid("Top Notes"),
+            "middle": get_notes_from_pyramid("Middle Notes"),
+            "base": get_notes_from_pyramid("Base Notes")
+        }
+
+        # حل احتياطي (Backup Plan): إذا كانت الأقسام فارغة، نسحب كل الصور التي تتبع نمط النوتات
+        if not any(final_notes.values()):
+            backup_matches = re.findall(r'src="([^"]+nnotes[^"]+)".*?>\s*([^<]+)\s*</span>', html, re.DOTALL | re.I)
+            if backup_matches:
+                # نضعها كلها في قسم الـ Top كبداية لكي تظهر للمستخدم
+                final_notes["top"] = [{"name": m[1].strip(), "image": m[0]} for m in backup_matches]
 
         return jsonify({
             "status": "success",
-            "description": desc,
-            "notes": {
-                "all": all_notes, # نرسلها مجمعة لضمان الظهور
-                "top": all_notes[:3],
-                "middle": all_notes[3:6],
-                "base": all_notes[6:]
-            }
+            "description": str(desc),
+            "notes": final_notes
         }), 200
 
     except Exception as e:
