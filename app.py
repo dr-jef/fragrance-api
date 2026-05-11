@@ -12,48 +12,45 @@ CORS(app)
 def scrape_fragrantica():
     target_url = request.args.get('url')
     if not target_url:
-        return jsonify({"error": "Missing URL"}), 400
+        return jsonify({"error": "No URL"}), 400
 
     try:
-        # استخدام جسر AllOrigins الخام لتجاوز الحظر
+        # استخدام AllOrigins بنمط RAW لجلب الصفحة
         proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(target_url)}"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(proxy_url, headers=headers, timeout=30)
         
-        if response.status_code != 200:
-            return jsonify({"error": "Bridge error"}), 502
-            
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
 
-        # استخراج الوصف
-        desc = "الوصف غير متوفر حالياً."
+        # 1. استخراج الوصف
+        desc = "الوصف غير متوفر."
         desc_div = soup.find('div', id='perfume-description-content')
         if desc_div and desc_div.find('p'):
             desc = desc_div.find('p').get_text(strip=True)
 
-        # دالة محسنة جداً لاستخراج النوتات
-        def extract_notes(html_content, label):
-            found_notes = []
-            if label in html_content:
+        # 2. استخراج النوتات بذكاء
+        def get_notes_by_label(html_text, label):
+            found = []
+            if label in html_text:
                 try:
-                    segment = html_content.split(label)[1].split('</div>')[0]
-                    # البحث عن الصور والأسماء داخل هذا القسم
-                    pattern = r'src="([^"]+)".*?>\s*([^<]+)\s*</span>'
-                    matches = re.findall(pattern, segment, re.DOTALL)
+                    # نأخذ المقطع الذي يلي العنوان مباشرة
+                    segment = html_text.split(label)[1].split('</div>')[0]
+                    # نمط البحث عن رابط الصورة واسم النوتة
+                    pattern = r'src="([^"]+)".*?pyramid-note-label[^>]*>\s*([^<]+)\s*</span>'
+                    matches = re.findall(pattern, segment, re.DOTALL | re.IGNORECASE)
                     for img, name in matches:
-                        if "nnotes" in img: # التأكد أنها صورة نوتة
-                            found_notes.append({'name': name.strip(), 'image': img.strip()})
+                        found.append({'name': name.strip(), 'image': img.strip()})
                 except: pass
-            return found_notes
+            return found
 
         return jsonify({
             "status": "success",
             "description": desc,
             "notes": {
-                "top": extract_notes(html, 'Top Notes'),
-                "middle": extract_notes(html, 'Middle Notes'),
-                "base": extract_notes(html, 'Base Notes')
+                "top": get_notes_by_label(html, 'Top Notes'),
+                "middle": get_notes_by_label(html, 'Middle Notes'),
+                "base": get_notes_by_label(html, 'Base Notes')
             }
         }), 200
 
