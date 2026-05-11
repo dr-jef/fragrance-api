@@ -18,7 +18,7 @@ def scrape_fragrantica():
         return jsonify({"error": "رابط غير صالح"}), 400
 
     try:
-        # السر هنا: استخدام AllOrigins كمحطة وسيطة لتجاوز حظر Cloudflare لسيرفرات Render
+        # استخدام AllOrigins كجسر لتجاوز حظر Cloudflare لسيرفرات Render
         bridge_url = "https://api.allorigins.win/get?url=" + urllib.parse.quote(target_url)
         
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -29,17 +29,17 @@ def scrape_fragrantica():
             html = data.get('contents', '')
 
         if not html:
-            return jsonify({"error": "فشل جلب البيانات من الجسر الوسيط"}), 502
+            return jsonify({"error": "لم يتم العثور على محتوى في الصفحة"}), 502
             
         soup = BeautifulSoup(html, 'html.parser')
 
-        # --- 1. استخراج الوصف ---
+        # استخراج الوصف
         desc = "لا يوجد وصف متاح"
         desc_div = soup.find('div', id='perfume-description-content')
         if desc_div and desc_div.find('p'):
             desc = desc_div.find('p').get_text(strip=True)
 
-        # --- 2. دالة استخراج النوتات ---
+        # دالة استخراج النوتات
         def get_notes(html_text, level_name):
             notes = []
             parts = html_text.split(level_name)
