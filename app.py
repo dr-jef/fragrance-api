@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 import urllib.request
 import urllib.parse
 import json
-import re
 import os
 
 app = Flask(__name__)
@@ -13,32 +12,37 @@ CORS(app)
 @app.route('/scrape', methods=['GET'])
 def scrape_fragrantica():
     target_url = request.args.get('url')
-    if not target_url or 'fragrantica.com/perfume/' not in target_url:
-        return jsonify({"error": "رابط غير صحيح"}), 400
+    if not target_url:
+        return jsonify({"error": "No URL provided"}), 400
 
     try:
-        # استخدام جسر AllOrigins لتجاوز الحماية (هذا هو الحل الوحيد لـ Render)
-        bridge_url = "https://api.allorigins.win/get?url=" + urllib.parse.quote(target_url)
+        # استخدام وسيط (Bridge) لتجاوز حماية Fragrantica
+        # هذا المسار لا يمكن حظره لأنه يطلب البيانات من سيرفر AllOrigins
+        proxy_url = "https://api.allorigins.win/get?url=" + urllib.parse.quote(target_url)
         
-        req = urllib.request.Request(bridge_url, headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(proxy_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=30) as response:
             data = json.loads(response.read().decode())
             html = data.get('contents', '')
 
         if not html:
-            return jsonify({"error": "فشل جلب البيانات من الجسر"}), 502
+            return jsonify({"error": "Empty content from bridge"}), 502
             
         soup = BeautifulSoup(html, 'html.parser')
-        desc = "لا يوجد وصف"
+        
+        # استخراج الوصف
+        desc = "No description found"
         desc_div = soup.find('div', id='perfume-description-content')
         if desc_div and desc_div.find('p'):
             desc = desc_div.find('p').get_text(strip=True)
 
+        # استخراج النوتات
+        import re
         def get_notes(html_text, level_name):
             notes = []
             parts = html_text.split(level_name)
             if len(parts) > 1:
-                block = parts[1][:3000] 
+                block = parts[1][:3000]
                 pattern = r'<a[^>]*pyramid-note-link[^>]*>.*?<img[^>]*src="([^"]+)".*?<span[^>]*pyramid-note-label[^>]*>\s*([^<]+)\s*<\/span>'
                 matches = re.findall(pattern, block, re.IGNORECASE | re.DOTALL)
                 for img, name in matches:
@@ -46,6 +50,7 @@ def scrape_fragrantica():
             return notes
 
         return jsonify({
+            "version": "2.0-NEW",
             "description": desc,
             "notes": {
                 "top": get_notes(html, 'Top Notes'),
