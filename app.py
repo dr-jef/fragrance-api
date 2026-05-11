@@ -13,34 +13,30 @@ CORS(app)
 @app.route('/scrape', methods=['GET'])
 def scrape_fragrantica():
     target_url = request.args.get('url')
-    
     if not target_url or 'fragrantica.com/perfume/' not in target_url:
-        return jsonify({"error": "رابط غير صالح"}), 400
+        return jsonify({"error": "URL invalid"}), 400
 
     try:
-        # الحل النهائي: استخدام جسر AllOrigins لتجاوز حظر Cloudflare
-        # هذا الجسر سيقوم بجلب محتوى الصفحة لنا كأننا متصفح عادي
+        # استخدام جسر AllOrigins لتجاوز حظر Cloudflare نهائياً
         bridge_url = "https://api.allorigins.win/get?url=" + urllib.parse.quote(target_url)
         
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        req = urllib.request.Request(bridge_url, headers=headers)
-        
+        req = urllib.request.Request(bridge_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=30) as response:
             data = json.loads(response.read().decode())
             html = data.get('contents', '')
 
         if not html:
-            return jsonify({"error": "فشل جلب محتوى الصفحة من الوسيط"}), 502
+            return jsonify({"error": "No content found"}), 502
             
         soup = BeautifulSoup(html, 'html.parser')
 
-        # --- 1. استخراج الوصف ---
+        # استخراج الوصف
         desc = "لا يوجد وصف متاح"
         desc_div = soup.find('div', id='perfume-description-content')
         if desc_div and desc_div.find('p'):
             desc = desc_div.find('p').get_text(strip=True)
 
-        # --- 2. دالة استخراج النوتات ---
+        # استخراج النوتات
         def get_notes(html_text, level_name):
             notes = []
             parts = html_text.split(level_name)
