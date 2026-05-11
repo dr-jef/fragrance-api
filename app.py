@@ -14,42 +14,37 @@ def scrape_fragrantica():
     if not target_url:
         return jsonify({"error": "Missing URL"}), 400
 
-    # تصحيح الرابط إذا كان ينقصه البروتوكول
-    if not target_url.startswith('http'):
-        target_url = 'https://' + target_url
-
     try:
-        # استخدام AllOrigins بنمط RAW لجلب محتوى الصفحة بالكامل
+        # استخدام جسر AllOrigins الخام لتجاوز الحظر
         proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(target_url)}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(proxy_url, headers=headers, timeout=30)
+        
         if response.status_code != 200:
-            return jsonify({"error": "لا يمكن الوصول للموقع حالياً"}), 502
+            return jsonify({"error": "Bridge error"}), 502
             
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
 
-        # 1. استخراج الوصف
+        # استخراج الوصف
         desc = "الوصف غير متوفر حالياً."
         desc_div = soup.find('div', id='perfume-description-content')
         if desc_div and desc_div.find('p'):
             desc = desc_div.find('p').get_text(strip=True)
 
-        # 2. استخراج النوتات (طريقة محسنة جداً)
+        # دالة محسنة جداً لاستخراج النوتات
         def extract_notes(html_content, label):
             found_notes = []
             if label in html_content:
-                # نأخذ المقطع الذي يلي العنوان (Top, Middle, Base)
-                segment = html_content.split(label)[1][:6000] 
-                # البحث عن أي نمط يحتوي على صورة واسم نوتة
-                pattern = r'src="([^"]+)".*?pyramid-note-label[^>]*>\s*([^<]+)\s*</span>'
-                matches = re.findall(pattern, segment, re.DOTALL | re.IGNORECASE)
-                for img, name in matches:
-                    found_notes.append({
-                        'name': name.strip(),
-                        'image': img.strip()
-                    })
+                try:
+                    segment = html_content.split(label)[1].split('</div>')[0]
+                    # البحث عن الصور والأسماء داخل هذا القسم
+                    pattern = r'src="([^"]+)".*?>\s*([^<]+)\s*</span>'
+                    matches = re.findall(pattern, segment, re.DOTALL)
+                    for img, name in matches:
+                        if "nnotes" in img: # التأكد أنها صورة نوتة
+                            found_notes.append({'name': name.strip(), 'image': img.strip()})
+                except: pass
             return found_notes
 
         return jsonify({
