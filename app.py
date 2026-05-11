@@ -12,49 +12,44 @@ CORS(app)
 def scrape_fragrantica():
     target_url = request.args.get('url')
     if not target_url:
-        return jsonify({"error": "URL missing"}), 400
+        return jsonify({"error": "رابط مفقود"}), 400
 
     try:
-        # استخدام AllOrigins بنمط RAW لسرعة الاستجابة
+        # استخدام الرابط المباشر عبر AllOrigins الخام
         proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(target_url)}"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
         response = requests.get(proxy_url, headers=headers, timeout=30)
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
 
-        # 1. استخراج الوصف بشكل نصي صافي (لحل مشكلة object Object)
-        desc_text = "الوصف غير متوفر حالياً."
+        # 1. استخراج الوصف (نص صافي 100%)
+        desc_text = "الوصف غير متوفر لهذا العطر."
         desc_div = soup.find('div', id='perfume-description-content')
         if desc_div:
-            # نأخذ أول فقرتين فقط لضمان النظافة
-            p_tags = desc_div.find_all('p')
-            if p_tags:
-                desc_text = " ".join([p.get_text(strip=True) for p in p_tags[:2]])
+            # مسح أي وسوم داخلية والحصول على النص فقط
+            desc_text = desc_div.get_text(" ", strip=True)
+            # تنظيف النص من أي علامات غريبة
+            desc_text = re.sub(r'\s+', ' ', desc_text)[:500] + "..."
 
-        # 2. دالة استخراج النوتات (منطق Colab المطور)
-        def get_notes(html_str, section_name):
-            notes_list = []
-            if section_name in html_str:
-                # نأخذ المقطع الذي يلي العنوان
-                parts = html_str.split(section_name)
-                segment = parts[1][:5000] # نطاق بحث واسع
-                # البحث عن رابط الصورة والاسم المصاحب له
-                matches = re.findall(r'src="([^"]+nnotes[^"]+)".*?pyramid-note-label[^>]*>\s*([^<]+)\s*</span>', segment, re.DOTALL | re.IGNORECASE)
+        # 2. استخراج النوتات (منطق مرن جداً)
+        def get_notes_list(label):
+            notes = []
+            if label in html:
+                segment = html.split(label)[1].split('</div>')[0]
+                # البحث عن أي نمط يحتوي على رابط صورة واسم
+                matches = re.findall(r'src="([^"]+nnotes[^"]+)".*?>\s*([^<]+)\s*</span>', segment, re.I)
                 for img, name in matches:
-                    notes_list.append({
-                        "name": name.strip(),
-                        "image": img.strip()
-                    })
-            return notes_list
+                    notes.append({"name": name.strip(), "image": img.strip()})
+            return notes
 
         return jsonify({
             "status": "success",
-            "description": str(desc_text), # نضمن أنه String
+            "description": str(desc_text),
             "notes": {
-                "top": get_notes(html, 'Top Notes'),
-                "middle": get_notes(html, 'Middle Notes'),
-                "base": get_notes(html, 'Base Notes')
+                "top": get_notes_list('Top Notes'),
+                "middle": get_notes_list('Middle Notes'),
+                "base": get_notes_list('Base Notes')
             }
         }), 200
 
