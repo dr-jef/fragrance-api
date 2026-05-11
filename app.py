@@ -11,47 +11,42 @@ CORS(app)
 @app.route('/scrape', methods=['GET'])
 def scrape_fragrantica():
     target_url = request.args.get('url')
-    
-    # 1. التحقق من وجود الرابط وصحته
     if not target_url:
-        return jsonify({"error": "Missing URL parameter"}), 400
-    
-    if 'fragrantica.com' not in target_url:
-        return jsonify({"error": "Only Fragrantica URLs are allowed"}), 400
+        return jsonify({"error": "Missing URL"}), 400
 
-    # التأكد من وجود البروتوكول
     if not target_url.startswith('http'):
         target_url = 'https://' + target_url
 
     try:
-        # 2. استخدام جسر AllOrigins لجلب البيانات
-        proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(target_url)}"
+        # استخدام AllOrigins بنمط RAW لجلب الصفحة بسرعة وكأنها طلب مباشر
+        proxy_url = f"https://api.allorigins.win/raw?url={requests.utils.quote(target_url)}"
         
-        response = requests.get(proxy_url, timeout=30)
-        response.raise_for_status() # سيثير خطأ إذا كان الرد 404 أو 500
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(proxy_url, headers=headers, timeout=25)
         
-        data = response.json()
-        html = data.get('contents', '')
-
-        if not html or 'Checking your browser' in html:
-            return jsonify({"error": "Cloudflare bypass failed on bridge"}), 502
+        if response.status_code != 200:
+            return jsonify({"error": f"Bridge error: {response.status_code}"}), 502
             
+        html = response.text
         soup = BeautifulSoup(html, 'html.parser')
 
-        # 3. استخراج الوصف
-        desc = "No description available"
+        # استخراج الوصف
+        desc = "لا يوجد وصف متاح لهذا العطر حالياً."
         desc_div = soup.find('div', id='perfume-description-content')
-        if desc_div and desc_div.find('p'):
-            desc = desc_div.find('p').get_text(strip=True)
+        if desc_div:
+            p_tag = desc_div.find('p')
+            if p_tag:
+                desc = p_tag.get_text(strip=True)
 
-        # 4. دالة استخراج النوتات
-        def get_notes(html_text, level_name):
+        # استخراج النوتات
+        def extract_notes(html_content, label):
             notes = []
-            parts = html_text.split(level_name)
-            if len(parts) > 1:
-                block = parts[1][:4000] 
-                pattern = r'pyramid-note-link.*?src="([^"]+)".*?pyramid-note-label[^>]*>\s*([^<]+)\s*</span>'
-                matches = re.findall(pattern, block, re.IGNORECASE | re.DOTALL)
+            if label in html_content:
+                parts = html_content.split(label)
+                # نأخذ الجزء بعد كلمة العنوان (Top, Middle, Base)
+                sub_html = parts[1].split('</div>')[0] 
+                pattern = r'src="([^"]+)".*?pyramid-note-label[^>]*>\s*([^<]+)\s*</span>'
+                matches = re.findall(pattern, sub_html, re.DOTALL)
                 for img, name in matches:
                     notes.append({'name': name.strip(), 'image': img.strip()})
             return notes
@@ -60,20 +55,15 @@ def scrape_fragrantica():
             "status": "success",
             "description": desc,
             "notes": {
-                "top": get_notes(html, 'Top Notes'),
-                "middle": get_notes(html, 'Middle Notes'),
-                "base": get_notes(html, 'Base Notes')
+                "top": extract_notes(html, 'Top Notes'),
+                "middle": extract_notes(html, 'Middle Notes'),
+                "base": extract_notes(html, 'Base Notes')
             }
         }), 200
 
     except Exception as e:
-        # إرجاع تفاصيل الخطأ بدقة
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "suggestion": "Try refreshing the page in a few seconds."
-        }), 500
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
